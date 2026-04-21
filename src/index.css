@@ -1,0 +1,154 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-w: 248px;
+    --topbar-h: 58px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 15px; scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #F5F7FA;
+    color: #1A202C;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+  }
+  h1,h2,h3,h4,h5,h6 { font-family: 'Plus Jakarta Sans', sans-serif; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #CBD5E0; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #A0AEC0; }
+}
+
+@layer components {
+  /* ── Layout ── */
+  .page { @apply animate-fade-in; }
+  
+  /* ── Cards ── */
+  .card {
+    @apply bg-white border border-slate-200/80 rounded-xl;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+  }
+  .card-hover { @apply card hover:shadow-md hover:border-slate-300/80 transition-all duration-150; }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold
+           hover:bg-blue-700 active:scale-[0.98] transition-all duration-100 shadow-sm;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium
+           border border-slate-200 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all duration-100;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg text-slate-600 text-sm font-medium
+           hover:bg-slate-100 hover:text-slate-900 active:scale-[0.98] transition-all duration-100;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold
+           hover:bg-red-700 active:scale-[0.98] transition-all duration-100;
+  }
+  .btn-success {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold
+           hover:bg-emerald-700 active:scale-[0.98] transition-all duration-100;
+  }
+
+  /* ── Form inputs ── */
+  .input-base {
+    @apply w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900
+           placeholder-slate-400 outline-none transition-all duration-100
+           focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10;
+  }
+  .label {
+    @apply block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5;
+  }
+
+  /* ── Navigation ── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 text-sm font-medium
+           transition-all duration-100 hover:bg-slate-100 hover:text-slate-900 relative;
+  }
+  .nav-item.active {
+    @apply bg-blue-50 text-blue-700 font-semibold;
+  }
+  .nav-group-label {
+    @apply px-3 mb-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest;
+  }
+
+  /* ── Table ── */
+  .table-head-cell {
+    @apply px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-widest
+           border-b border-slate-100 whitespace-nowrap bg-slate-50/70;
+  }
+  .table-cell {
+    @apply px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50 whitespace-nowrap;
+  }
+  .table-row-hover { @apply hover:bg-blue-50/30 transition-colors duration-75 cursor-pointer; }
+
+  /* ── Badge ── */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide;
+  }
+
+  /* ── Stat card ── */
+  .stat-card {
+    @apply card p-5 relative overflow-hidden;
+  }
+
+  /* ── Section header ── */
+  .section-title {
+    @apply font-display font-bold text-xl text-slate-900 tracking-tight;
+  }
+
+  /* ── Tabs ── */
+  .tab-btn { @apply flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-100; }
+  .tab-btn.active   { @apply bg-blue-600 text-white shadow-sm; }
+  .tab-btn.inactive { @apply text-slate-600 hover:text-slate-900 hover:bg-slate-100; }
+
+  /* ── Dropdown ── */
+  .dropdown-menu {
+    @apply absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl
+           shadow-[0_8px_24px_rgba(0,0,0,0.1)] overflow-hidden;
+  }
+  .dropdown-item {
+    @apply flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 cursor-pointer
+           hover:bg-blue-50 hover:text-blue-700 transition-colors duration-75;
+  }
+
+  /* ── Modal ── */
+  .modal-backdrop {
+    @apply fixed inset-0 z-[999] flex items-center justify-center p-4;
+    background: rgba(15,23,42,0.45);
+    backdrop-filter: blur(4px);
+  }
+  .modal-box {
+    @apply bg-white border border-slate-200 rounded-2xl w-full overflow-hidden animate-slide-up;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.03);
+  }
+
+  /* ── Alert ── */
+  .alert-info    { @apply flex items-start gap-3 px-4 py-3 rounded-xl border text-sm bg-blue-50   border-blue-200   text-blue-800; }
+  .alert-success { @apply flex items-start gap-3 px-4 py-3 rounded-xl border text-sm bg-emerald-50 border-emerald-200 text-emerald-800; }
+  .alert-warning { @apply flex items-start gap-3 px-4 py-3 rounded-xl border text-sm bg-amber-50  border-amber-200  text-amber-800; }
+  .alert-danger  { @apply flex items-start gap-3 px-4 py-3 rounded-xl border text-sm bg-red-50    border-red-200    text-red-800; }
+
+  /* ── Shimmer ── */
+  .shimmer {
+    background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
+    background-size: 400px 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  
+  /* ── Wizard step ── */
+  .wizard-step-active { @apply bg-blue-600 text-white; }
+  .wizard-step-done   { @apply bg-emerald-500 text-white; }
+  .wizard-step-idle   { @apply bg-slate-200 text-slate-500; }
+}
