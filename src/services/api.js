@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || ''
+const BASE = import.meta.env.VITE_API_URL || 'https://xedux.kawalyaumar500.workers.dev'
 
 async function req(method, path, body, token) {
   const res = await fetch(`${BASE}${path}`, {
@@ -173,7 +173,7 @@ export const curriculumApi = {
 
   // Lesson plan attachments (R2 server-side)
   uploadPlanFile:      (sid, lessonId, formData, tok) => {
-    const BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || ''
+    const BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'https://xedux.kawalyaumar500.workers.dev'
     return fetch(`${BASE}/api/schools/${sid}/aca/lessons/${lessonId}/plan/upload`, {
       method: 'POST', headers: { Authorization: `Bearer ${tok}` }, body: formData,
     }).then(r => r.json()).then(j => { if (!j.success) throw new Error(j.error?.message || j.message || 'Upload failed'); return j.data; })
@@ -183,7 +183,7 @@ export const curriculumApi = {
 
   // Case-study uploads (R2 server-side — single step)
   uploadCaseStudyFile: (sid, lessonId, formData, tok) => {
-    const BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || ''
+    const BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'https://xedux.kawalyaumar500.workers.dev'
     return fetch(`${BASE}/api/schools/${sid}/aca/lessons/${lessonId}/case-study/upload`, {
       method: 'POST', headers: { Authorization: `Bearer ${tok}` }, body: formData,
     }).then(r => r.json()).then(j => { if (!j.success) throw new Error(j.error?.message || j.message || 'Upload failed'); return j.data; })
