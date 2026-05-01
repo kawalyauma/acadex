@@ -1,498 +1,847 @@
 /**
- * examPdf.js — Professional Academic PDF Generator
- * Features: school logo, student photo slot, barcode, attendance, Uganda PLE grades
+ * examPdf.js — Premium Academic PDF Generator
+ * Uganda PLE | Streamlined & Professional Report Card
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JsBarcode from 'jsbarcode'
 
-// ── Design tokens ────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
-  navy:'#0F172A', blue:'#1D4ED8', blueL:'#DBEAFE',
-  slate:'#64748B', slateL:'#F1F5F9', white:'#FFFFFF', border:'#E2E8F0',
-}
-const GRADE_CLR = {
-  D1:'#059669',D2:'#10B981',C3:'#1D4ED8',C4:'#3B82F6',
-  C5:'#60A5FA',C6:'#93C5FD',P7:'#D97706',P8:'#F59E0B',F9:'#DC2626',NG:'#94A3B8',
-}
-const AGG_CLR = (a) => {
-  if (a==null) return C.slate
-  if (a<=8)  return '#059669'
-  if (a<=14) return '#1D4ED8'
-  if (a<=20) return '#7C3AED'
-  if (a<=28) return '#D97706'
-  return '#DC2626'
-}
-function h2r(hex) {
-  const h=hex.replace('#','')
-  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]
+  ink:       '#0D1117',
+  inkSoft:   '#1F2937',
+  slate:     '#4B5563',
+  muted:     '#9CA3AF',
+  rule:      '#E5E7EB',
+  surface:   '#F9FAFB',
+  white:     '#FFFFFF',
+  headerBg:  '#0D1117',
+  accent:    '#1D4ED8',
+  accentBg:  '#EFF6FF',
+  D1: '#047857', D2: '#059669',
+  C3: '#1D4ED8', C4: '#2563EB', C5: '#3B82F6', C6: '#60A5FA',
+  P7: '#B45309', P8: '#D97706',
+  F9: '#B91C1C', NG: '#6B7280',
+  div1: '#047857', div2: '#1D4ED8', div3: '#6D28D9', div4: '#B45309', divU: '#B91C1C',
 }
 
-// ── Barcode ────────────────────────────────────────────────
+function h2r(hex) {
+  const h = hex.replace('#', '')
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]
+}
+const rgb  = (hex) => h2r(hex)
+const setFill = (doc, hex) => doc.setFillColor(...rgb(hex))
+const setDraw = (doc, hex) => doc.setDrawColor(...rgb(hex))
+const setTxt  = (doc, hex) => doc.setTextColor(...rgb(hex))
+const font    = (doc, style, size) => { doc.setFont('helvetica', style); doc.setFontSize(size) }
+
+// ── Grade helpers ─────────────────────────────────────────────────────────────
+function gradeColor(grade, bands = []) {
+  const band = bands.find(b => b.grade === grade)
+  if (band?.color_hex) return band.color_hex
+  return C[grade] || C.NG
+}
+
+function aggToDivision(agg) {
+  if (agg == null) return { label: 'Ungraded', color: C.divU, range: '—' }
+  if (agg <= 12)   return { label: 'Division I',   color: C.div1, range: '4–12'  }
+  if (agg <= 23)   return { label: 'Division II',  color: C.div2, range: '13–23' }
+  if (agg <= 29)   return { label: 'Division III', color: C.div3, range: '24–29' }
+  if (agg <= 34)   return { label: 'Division IV',  color: C.div4, range: '30–34' }
+  return { label: 'Ungraded', color: C.divU, range: '35+' }
+}
+
+// ── Barcode (Professional Styling) ────────────────────────────────────────────
 function barcodeImg(text) {
   try {
-    const c=document.createElement('canvas')
-    JsBarcode(c,String(text||'0'),{format:'CODE128',width:1.4,height:26,displayValue:false,margin:2,background:'#fff',lineColor:'#0F172A'})
+    const c = document.createElement('canvas')
+    JsBarcode(c, String(text || '0'), {
+      format: 'CODE128', width: 1.5, height: 28,
+      displayValue: false, margin: 0, background: '#ffffff', lineColor: '#0D1117',
+    })
     return c.toDataURL('image/png')
   } catch { return null }
 }
 
-// ── Image loader ───────────────────────────────────────────
-async function loadImg(src) {
-  if (!src) return null
-  return new Promise(res=>{
-    const img=new Image(); img.crossOrigin='anonymous'
-    img.onload=()=>{ const c=document.createElement('canvas'); c.width=img.naturalWidth||100; c.height=img.naturalHeight||100; c.getContext('2d').drawImage(img,0,0); res(c.toDataURL('image/png')) }
-    img.onerror=()=>res(null); img.src=src
-  })
+// ── Page chrome ───────────────────────────────────────────────────────────────
+function drawPageBg(doc) {
+  setFill(doc, C.white); doc.rect(0, 0, 210, 297, 'F')
 }
 
-// ── Footer ─────────────────────────────────────────────────
-function addFooter(doc, schoolName) {
-  const n=doc.internal.getNumberOfPages()
-  const ts=new Date().toLocaleString('en-UG',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})
-  for(let i=1;i<=n;i++){
-    doc.setPage(i)
-    doc.setDrawColor(...h2r(C.border)); doc.setLineWidth(0.25); doc.line(14,284,196,284)
-    doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...h2r(C.slate))
-    doc.text(`${schoolName||'School'} — Confidential Academic Record`,14,289)
-    doc.text(`Printed: ${ts}  |  Page ${i} of ${n}`,196,289,{align:'right'})
-  }
-}
+function drawHeader(doc, schoolName, examLabel) {
+  const W = 210
 
-// ── Letterhead ─────────────────────────────────────────────
-async function drawLetterhead(doc, schoolName, logoUrl, subtitle) {
-  const logo=await loadImg(logoUrl)
-  doc.setFillColor(...h2r(C.navy)); doc.rect(0,0,210,30,'F')
-  doc.setFillColor(...h2r(C.blue)); doc.rect(0,30,210,3,'F')
-  if(logo){
-    doc.addImage(logo,'PNG',13,4,22,22)
-  } else {
-    doc.setFillColor(...h2r(C.blue)); doc.circle(24,15,9,'F')
-    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...h2r(C.white))
-    doc.text((schoolName||'S')[0].toUpperCase(),24,18.5,{align:'center'})
-  }
-  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(...h2r(C.white))
-  doc.text(schoolName||'School',41,13)
-  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...h2r(C.blueL))
-  doc.text(subtitle||'Academic Report',41,20)
-  doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(180,200,255)
-  doc.text('OFFICIAL ACADEMIC DOCUMENT',196,26,{align:'right'})
-  return 37
-}
+  // Top accent bar
+  setFill(doc, C.accent)
+  doc.rect(0, 0, W, 3, 'F')
 
-// ── Student info panel ─────────────────────────────────────
-async function drawStudentPanel(doc, card, y) {
-  const H=38
-  doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(14,y,182,H,2,2,'F')
-  doc.setDrawColor(...h2r(C.border)); doc.setLineWidth(0.3); doc.roundedRect(14,y,182,H,2,2,'S')
+  // School name
+  font(doc, 'bold', 13); setTxt(doc, C.ink)
+  doc.text(schoolName || 'LUBOWA MEMORIAL JUNIOR SCHOOL', W / 2, 10, { align: 'center' })
 
-  // Photo box
-  const PX=167,PY=y+3,PW=25,PH=32
-  doc.setFillColor(210,222,240); doc.roundedRect(PX,PY,PW,PH,1.5,1.5,'F')
-  doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(...h2r(C.slate))
-  doc.text('PASSPORT',PX+PW/2,PY+PH/2+1,{align:'center'})
-  doc.text('PHOTO',PX+PW/2,PY+PH/2+5,{align:'center'})
-
-  // Details grid
-  const fields=[
-    ['Full Name',     `${card.first_name||''} ${card.last_name||''}`.trim()||'—'],
-    ['Adm. Number',   card.student_number||'—'],
-    ['Class / Stream',`${card.class_name||'—'}${card.stream_name?' / '+card.stream_name:''}`],
-    ['Academic Year', card.academic_year_name||'—'],
-    ['Term',          card.term_name||'—'],
-    ['Exam',          card.exam_name||'—'],
-  ]
-  fields.forEach(([lbl,val],i)=>{
-    const col=i%2, row=Math.floor(i/2)
-    const fx=20+col*76, fy=y+8+row*11
-    doc.setFont('helvetica','bold'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate))
-    doc.text(lbl.toUpperCase(),fx,fy)
-    doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...h2r(C.navy))
-    doc.text(String(val).substring(0,32),fx,fy+4.5)
-  })
-
-  // Barcode
-  const bc=barcodeImg(card.student_number||card.student_id)
-  if(bc){ doc.addImage(bc,'PNG',PX-40,y+H-14,38,11); doc.setFont('helvetica','normal'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate)); doc.text(String(card.student_number||''),PX-21,y+H-2,{align:'center'}) }
-
-  return y+H+4
-}
-
-// ── Aggregate bar ──────────────────────────────────────────
-const DIV_COLORS = { '1':'#059669','2':'#1D4ED8','3':'#7C3AED','4':'#D97706','U':'#DC2626' }
-
-function drawAggBar(doc, card, y) {
-  const agg=card.aggregate, ac=AGG_CLR(agg)
-  const div=card.division||'U'
-  const divColor=DIV_COLORS[div]||'#DC2626'
-  doc.setFillColor(...h2r(C.navy)); doc.roundedRect(14,y,182,20,2,2,'F')
-
-  // Aggregate number
-  doc.setFont('helvetica','bold'); doc.setFontSize(24); doc.setTextColor(...h2r(ac))
-  doc.text(agg!=null?String(agg):'—',30,y+13)
-  doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(...h2r(C.blueL))
-  doc.text('AGGREGATE',30,y+18)
+  // Contact line — all on one row
+  font(doc, 'normal', 5.5); setTxt(doc, C.slate)
+  doc.text(
+    'Mpongo, Gomba - Uganda  ·  Tel: 0701069595 / 0782408202  ·  www.lubowamemorial.com',
+    W / 2, 15, { align: 'center' }
+  )
 
   // Divider
-  doc.setDrawColor(255,255,255); doc.setLineWidth(0.2); doc.line(56,y+4,56,y+16)
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.line(10, 18, W - 10, 18)
 
-  // DIVISION — the key result prominently displayed
-  const divLabel = div==='U' ? 'UNGRADED' : `DIVISION ${div}`
-  doc.setFillColor(...h2r(divColor)); doc.roundedRect(60,y+3,32,14,2,2,'F')
-  doc.setFont('helvetica','bold'); doc.setFontSize(div==='U'?7:9); doc.setTextColor(255,255,255)
-  doc.text(divLabel,76,y+12,{align:'center'})
+  // TRANSCRIPT label — left
+  font(doc, 'bold', 5.5); setTxt(doc, C.muted)
+  doc.text('OFFICIAL ACADEMIC TRANSCRIPT', 13, 23)
 
-  // Divider 2
-  doc.setDrawColor(255,255,255); doc.setLineWidth(0.2); doc.line(96,y+4,96,y+16)
+  // Exam label — center
+  font(doc, 'bold', 7); setTxt(doc, C.ink)
+  doc.text((examLabel || 'Report Card').toUpperCase(), W / 2, 23, { align: 'center' })
 
-  // Position
-  const pos=card.position_in_class, tot=card.total_students_in_class
-  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(...h2r(C.white))
-  doc.text(pos?`${pos}${pos===1?'st':pos===2?'nd':pos===3?'rd':'th'}`:'—',108,y+13)
-  doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(...h2r(C.blueL))
-  doc.text(`OF ${tot||'—'}`,108,y+18)
+  // CONFIDENTIAL — right
+  font(doc, 'bold', 5.5); setTxt(doc, C.accent)
+  doc.text('CONFIDENTIAL', W - 13, 23, { align: 'right' })
 
-  // Grade pills (right side)
-  const gs=typeof card.grade_summary==='string'?JSON.parse(card.grade_summary||'{}'):(card.grade_summary||{})
-  let gx=124
-  ;['D1','D2','C3','C4','C5','C6','P7','P8','F9'].forEach(g=>{
-    if(gs[g]&&gx<190){
-      const [r,gb,b]=h2r(GRADE_CLR[g]||C.slate)
-      doc.setFillColor(r,gb,b); doc.roundedRect(gx,y+5,15,10,1.5,1.5,'F')
-      doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(255,255,255)
-      doc.text(`${g}×${gs[g]}`,gx+7.5,y+12,{align:'center'})
-      gx+=17
-    }
+  // Bottom rule
+  setDraw(doc, C.accent); doc.setLineWidth(0.4)
+  doc.line(10, 26, W - 10, 26)
+
+  return 31
+}
+function drawStudentPanel(doc, card, y) {
+  const H = 32
+
+  setFill(doc, C.surface)
+  doc.roundedRect(10, y, 190, H, 2, 2, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.roundedRect(10, y, 190, H, 2, 2, 'S')
+
+  setFill(doc, C.accent)
+  doc.rect(10, y, 3, H, 'F')
+
+  font(doc, 'bold', 13); setTxt(doc, C.ink)
+  const fullName = `${card.first_name || ''} ${card.last_name || ''}`.trim() || '—'
+  doc.text(fullName, 17, y + 10)
+
+  font(doc, 'normal', 7.5); setTxt(doc, C.slate)
+  const subtitle = [
+    card.class_name,
+    card.stream_name,
+    card.academic_year_name,
+    card.term_name,
+  ].filter(Boolean).join('  ·  ')
+  doc.text(subtitle, 17, y + 17)
+
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.line(17, y + 19.5, 193, y + 19.5)
+
+  const bc = barcodeImg(card.student_number || card.student_id)
+  if (bc) {
+    doc.addImage(bc, 'PNG', 152, y + 2, 36, 10)
+    font(doc, 'normal', 5); setTxt(doc, C.muted)
+    doc.text(String(card.student_number || ''), 170, y + 14, { align: 'center' })
+  }
+
+  const meta = [
+    ['ADM NO', card.student_number || '—'],
+    ['CLASS',  `${card.class_name || '—'}${card.stream_name ? ' · ' + card.stream_name : ''}`],
+    ['EXAM',   card.exam_name || '—'],
+    ['TERM',   card.term_name || '—'],
+  ]
+
+  let mx = 17
+  meta.forEach(([lbl, val]) => {
+    font(doc, 'bold', 5); setTxt(doc, C.muted)
+    doc.text(lbl, mx, y + 24)
+    font(doc, 'bold', 7); setTxt(doc, C.ink)
+    doc.text(String(val).substring(0, 22), mx, y + 29.5)
+    mx += 44
   })
-  return y+24
+
+  return y + H + 4
 }
 
-// ── Marks table ────────────────────────────────────────────
-function drawMarksTable(doc, marks, y) {
-  autoTable(doc,{
-    startY:y,
-    head:[['#','Subject','Max','Score','%','Grade','Pts','Remarks']],
-    body:marks.map((m,i)=>[
-      i+1, m.subject_name||'—', m.exam_max_mark||m.max_mark||100,
-      m.is_absent?'ABS':m.is_exempt?'EXM':(m.marks_obtained??'—'),
-      m.percentage!=null?`${m.percentage}%`:'—',
-      m.grade||(m.is_gradable?'—':'NG'),
-      m.is_gradable&&m.grade_points!=null?m.grade_points:'—',
-      m.remarks||'',
-    ]),
-    headStyles:{fillColor:h2r(C.navy),textColor:[255,255,255],fontStyle:'bold',fontSize:7.5,cellPadding:2.5},
-    bodyStyles:{fontSize:8,cellPadding:2.2},
-    columnStyles:{
-      0:{cellWidth:7,halign:'center'},1:{cellWidth:50},2:{cellWidth:12,halign:'center'},
-      3:{cellWidth:14,halign:'center',fontStyle:'bold'},4:{cellWidth:14,halign:'center'},
-      5:{cellWidth:14,halign:'center',fontStyle:'bold'},6:{cellWidth:10,halign:'center'},7:{},
+function drawResultSummary(doc, card, bands, y) {
+  const agg     = card.aggregate
+  const divInfo = aggToDivision(agg)
+
+  const H  = 16
+  const by = y
+
+  setDraw(doc, divInfo.color); doc.setLineWidth(0.4)
+  doc.roundedRect(10, by, 190, H, 2, 2, 'S')
+
+  setFill(doc, divInfo.color)
+  doc.roundedRect(10, by, 4, H, 2, 2, 'F')
+  doc.rect(12, by, 2, H, 'F')
+
+  font(doc, 'bold', 6); setTxt(doc, C.muted)
+  doc.text('AGGREGATE', 18, by + 5.5)
+  font(doc, 'bold', 10); setTxt(doc, divInfo.color)
+  doc.text(agg != null ? String(agg) : '—', 18, by + 13)
+
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.line(48, by + 2, 48, by + H - 2)
+
+  font(doc, 'bold', 6); setTxt(doc, C.muted)
+  doc.text('DIVISION', 53, by + 5.5)
+  font(doc, 'bold', 10); setTxt(doc, divInfo.color)
+  doc.text(divInfo.label.toUpperCase(), 53, by + 13)
+
+  doc.line(122, by + 2, 122, by + H - 2)
+
+  font(doc, 'bold', 6); setTxt(doc, C.muted)
+  doc.text('Next term commence', 127, by + 5.5)
+  font(doc, 'bold', 10); setTxt(doc, C.ink)
+  doc.text('18th may 2026', 127, by + 13)
+
+  return by + H + 4
+}
+
+function drawMarksTable(doc, marks, y, bands) {
+  if (!marks?.length) return y
+
+  function getRemark(mark, grade, isAbsent, isExempt) {
+    if (isAbsent) return 'Absent'
+    if (isExempt) return 'Exempted'
+    if (mark == null) return ''
+    if (mark >= 80) return 'Excellent'
+    if (mark >= 70) return 'Very Good'
+    if (mark >= 60) return 'Good'
+    if (mark >= 50) return 'Fair'
+    if (mark >= 40) return 'Needs Improvement'
+    return 'Poor'
+  }
+
+  font(doc, 'bold', 7); setTxt(doc, C.muted)
+  doc.text('SUBJECT PERFORMANCE', 10, y + 4)
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.line(10, y + 6, 200, y + 6)
+
+  autoTable(doc, {
+    startY: y + 8,
+    head: [['#', 'Subject', 'Score', 'Grade', 'Remarks']],
+    body: marks.map((m, i) => {
+      const score = m.is_absent ? 'ABSENT' : m.is_exempt ? 'EXEMPT' : (m.marks_obtained ?? '—')
+      const grade = m.grade || (m.is_gradable ? '—' : 'NG')
+      return [
+        i + 1,
+        m.subject_name || '—',
+        score,
+        grade,
+        m.remarks || getRemark(m.marks_obtained, grade, m.is_absent, m.is_exempt),
+      ]
+    }),
+
+    headStyles: {
+      fillColor: rgb(C.ink),
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'center',
+      cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
     },
-    didParseCell(data){
-      if(data.section==='body'){
-        if(data.column.index===5&&GRADE_CLR[data.cell.raw]) data.cell.styles.textColor=h2r(GRADE_CLR[data.cell.raw])
-        if(data.column.index===3&&(data.cell.raw==='ABS'||data.cell.raw==='EXM')) data.cell.styles.textColor=h2r('#DC2626')
+
+    bodyStyles: {
+      fontSize: 8,
+      textColor: rgb(C.inkSoft),
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+      valign: 'middle',
+    },
+
+    columnStyles: {
+      0: { cellWidth: 7,  halign: 'center', textColor: rgb(C.muted), fontSize: 7 },
+      1: { cellWidth: 72, fontStyle: 'bold', fontSize: 8.5 },
+      2: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+      3: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+      4: { cellWidth: 47, textColor: rgb(C.muted), fontStyle: 'italic', fontSize: 7 },
+    },
+
+    didParseCell(data) {
+      if (data.section === 'body') {
+        const raw = data.cell.raw
+
+        if (data.column.index === 3) {
+          const gc = gradeColor(raw, bands)
+          if (gc) {
+            data.cell.styles.textColor = rgb(gc)
+            const [r, g, b] = rgb(gc)
+            data.cell.styles.fillColor = [
+              Math.min(255, r + 220),
+              Math.min(255, g + 220),
+              Math.min(255, b + 220),
+            ]
+          }
+        }
+
+        if (data.column.index === 2) {
+          if (raw === 'ABSENT') {
+            data.cell.styles.textColor = rgb(C.F9)
+            data.cell.styles.fontStyle = 'bold'
+          }
+          if (raw === 'EXEMPT') {
+            data.cell.styles.textColor = rgb(C.slate)
+            data.cell.styles.fontStyle = 'italic'
+          }
+        }
+
+        if (data.column.index === 2 && typeof raw === 'number') {
+          const scoreColor = raw >= 80 ? C.div1 : raw >= 60 ? C.div2 : raw >= 50 ? C.div4 : raw >= 40 ? C.P8 : C.F9
+          data.cell.styles.textColor = rgb(scoreColor)
+        }
+      }
+
+      if (data.section === 'head') {
+        if (data.column.index === 1) data.cell.styles.halign = 'left'
       }
     },
-    alternateRowStyles:{fillColor:h2r(C.slateL)},
-    styles:{lineColor:h2r(C.border),lineWidth:0.2},
-    margin:{left:14,right:14},
-  })
-  return doc.lastAutoTable.finalY+4
-}
 
-// ── Attendance row ─────────────────────────────────────────
-function drawAttRow(doc, att, y) {
-  if(!att) return y
-  const items=[
-    {l:'School Days',v:att.total_days??'—',c:C.navy},
-    {l:'Present',v:att.present_days??'—',c:'#059669'},
-    {l:'Absent',v:att.absent_days??'—',c:'#DC2626'},
-    {l:'Late',v:att.late_days??'—',c:'#D97706'},
-    {l:'Excused',v:att.excused_days??'—',c:'#7C3AED'},
-    {l:'Rate',v:att.attendance_percent!=null?`${att.attendance_percent}%`:'—',c:'#1D4ED8'},
-  ]
-  const bw=29,bh=14,gap=3.5
-  const tw=items.length*(bw+gap)-gap, sx=(210-tw)/2
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.slate))
-  doc.text('ATTENDANCE SUMMARY',14,y+4)
-  items.forEach((it,i)=>{
-    const x=sx+i*(bw+gap)
-    doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(x,y,bw,bh,1.5,1.5,'F')
-    doc.setDrawColor(...h2r(C.border)); doc.setLineWidth(0.2); doc.roundedRect(x,y,bw,bh,1.5,1.5,'S')
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...h2r(it.c))
-    doc.text(String(it.v),x+bw/2,y+8.5,{align:'center'})
-    doc.setFont('helvetica','normal'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate))
-    doc.text(it.l,x+bw/2,y+12.5,{align:'center'})
-  })
-  return y+bh+5
-}
-
-// ── Comments panel ─────────────────────────────────────────
-function drawComments(doc, card, y) {
-  const H=30
-  // CT
-  doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(14,y,88,H,2,2,'F')
-  doc.setDrawColor(...h2r(C.border)); doc.setLineWidth(0.2); doc.roundedRect(14,y,88,H,2,2,'S')
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.blue))
-  doc.text("CLASS TEACHER'S COMMENT",19,y+6)
-  doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...h2r(C.navy))
-  doc.text(doc.splitTextToSize(card.class_teacher_comment||'No comment.',78),19,y+11)
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.slate))
-  doc.text('Signature: ____________________',19,y+27)
-  // HM
-  doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(108,y,88,H,2,2,'F')
-  doc.roundedRect(108,y,88,H,2,2,'S')
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.blue))
-  doc.text("HEAD TEACHER'S COMMENT",113,y+6)
-  doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...h2r(C.navy))
-  doc.text(doc.splitTextToSize(card.head_teacher_comment||'No comment.',78),113,y+11)
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.slate))
-  doc.text('Signature: ____________________',113,y+27)
-  // Stamp
-  doc.setLineDash([1.5,1.5])
-  doc.roundedRect(58,y+18,40,12,1.5,1.5,'S')
-  doc.setLineDash([])
-  doc.setFont('helvetica','normal'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate))
-  doc.text('SCHOOL STAMP / SEAL',78,y+25,{align:'center'})
-  return y+H+4
-}
-
-// ── Curriculum summary (if available) ─────────────────────
-function drawCurriculumSummary(doc, curriculum, y) {
-  if (!curriculum || !curriculum.subjects?.length) return y
-
-  // Section label
-  doc.setFont('helvetica','bold'); doc.setFontSize(6); doc.setTextColor(...h2r(C.slate))
-  doc.text('CURRICULUM PERFORMANCE THIS TERM', 14, y+4)
-
-  // Summary stats row
-  const stats = [
-    { l:'Lessons', v: String(curriculum.lessons_attended||curriculum.total_lessons||0), c:C.navy },
-    { l:'Avg Mark', v: curriculum.avg_mark!=null?`${Number(curriculum.avg_mark).toFixed(1)}%`:'—', c:'#059669' },
-    { l:'Subjects', v: String(curriculum.subjects?.length||0), c:'#7C3AED' },
-  ]
-  const bw=35, bh=12, gap=4, sx=14
-  stats.forEach((st,i)=>{
-    const x=sx+i*(bw+gap)
-    doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(x,y+6,bw,bh,1.5,1.5,'F')
-    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...h2r(st.c))
-    doc.text(String(st.v),x+bw/2,y+13,{align:'center'})
-    doc.setFont('helvetica','normal'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate))
-    doc.text(st.l,x+bw/2,y+17,{align:'center'})
+    alternateRowStyles: { fillColor: rgb(C.surface) },
+    styles: { lineColor: rgb(C.rule), lineWidth: 0.1, overflow: 'ellipsize' },
+    margin: { left: 10, right: 10 },
   })
 
-  // Subject table
-  autoTable(doc, {
-    startY: y+22,
-    head:[['Subject','Lessons','Avg Mark','Topics Covered']],
-    body: curriculum.subjects.map(s=>[
-      s.subject_name||'—',
-      s.lessons_count||'—',
-      s.avg_mark!=null?`${Number(s.avg_mark).toFixed(1)}%`:'—',
-      s.topics_covered!=null?String(s.topics_covered):'—',
-    ]),
-    headStyles:{fillColor:h2r(C.navy),textColor:[255,255,255],fontStyle:'bold',fontSize:7,cellPadding:2},
-    bodyStyles:{fontSize:7.5,cellPadding:2},
-    columnStyles:{
-      0:{cellWidth:60},
-      1:{halign:'center',cellWidth:20},
-      2:{halign:'center',cellWidth:22,fontStyle:'bold'},
-      3:{halign:'center'},
-    },
-    alternateRowStyles:{fillColor:h2r(C.slateL)},
-    styles:{lineColor:h2r(C.border),lineWidth:0.2},
-    margin:{left:14,right:14},
-  })
-  return doc.lastAutoTable.finalY+4
+  return doc.lastAutoTable.finalY + 4
 }
 
-// ── One card renderer ──────────────────────────────────────
-async function renderCard(doc, card, schoolName, logoUrl, attendance, newPage) {
-  if(newPage) doc.addPage()
-  let y=await drawLetterhead(doc,schoolName,logoUrl,card.exam_name||'Report Card')
-  y=await drawStudentPanel(doc,card,y)
-  y=drawAggBar(doc,card,y)
-  y=drawMarksTable(doc,card.marks||[],y)
-  y=drawAttRow(doc,attendance||null,y)
-  // Curriculum performance summary (if loaded with the card)
-  if(card._curriculum) y=drawCurriculumSummary(doc,card._curriculum,y)
-  drawComments(doc,card,y)
-}
+function drawAttendanceSummary(doc, attendanceData, y, card) {
+  if (!attendanceData) return y
 
-// ═══════════════════════════════════════════════════════════
-// PUBLIC EXPORTS
-// ═══════════════════════════════════════════════════════════
+  const s      = attendanceData.summary || attendanceData
+  const total  = s.total_days   ?? s.total   ?? 0
+  const absent = s.absent_days  ?? s.absent  ?? 0
+  const rate   = s.attendance_percent ?? s.attendance_rate ??
+    (total > 0 ? Math.round((total - absent) / total * 100) : 0)
 
-/** Single student report card */
-export async function printReportCard(card, schoolName, logoUrl, attendance) {
-  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'})
-  await renderCard(doc,card,schoolName,logoUrl,attendance,false)
-  addFooter(doc,schoolName)
-  doc.save(`report-card-${card.student_number||card.student_id}.pdf`)
-}
+  const rateColor = rate >= 90 ? C.div1 : rate >= 75 ? C.div2 : rate >= 60 ? C.div4 : C.divU
+  const agg = card?.aggregate ?? null
 
-/** All cards for one class → single PDF */
-export async function printClassReportCards(cards, examName, className, schoolName, logoUrl, attMap={}) {
-  if(!cards.length) return
-  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'})
-  for(let i=0;i<cards.length;i++){
-    await renderCard(doc,{...cards[i],exam_name:examName},schoolName,logoUrl,attMap[cards[i].student_id],i>0)
+  function scoreToRating(score) {
+    if (score >= 85) return { label: 'Excellent', color: C.div1 }
+    if (score >= 70) return { label: 'Very Good',  color: C.div2 }
+    if (score >= 55) return { label: 'Good',       color: C.C4  }
+    if (score >= 40) return { label: 'Fair',       color: C.div4 }
+    return                  { label: 'Poor',       color: C.divU }
   }
-  addFooter(doc,schoolName)
-  doc.save(`report-cards-${className.replace(/\s/g,'-')}.pdf`)
+
+  const particulars = [
+    { name: 'Punctuality',    score: rate >= 95 ? 90 : rate >= 90 ? 78 : rate >= 80 ? 62 : rate >= 70 ? 48 : rate >= 60 ? 35 : 20 },
+    { name: 'Attendance',     score: rate >= 95 ? 95 : rate >= 90 ? 82 : rate >= 80 ? 68 : rate >= 70 ? 52 : rate >= 60 ? 38 : 22 },
+    { name: 'Academic Effort',score: agg == null ? 60 : agg <= 8 ? 95 : agg <= 12 ? 85 : agg <= 18 ? 74 : agg <= 23 ? 62 : agg <= 29 ? 48 : agg <= 34 ? 35 : 20 },
+    { name: 'Neatness',       score: Math.round((rate >= 90 ? 80 : rate >= 75 ? 68 : rate >= 60 ? 54 : 38) * 0.5 + (agg == null ? 60 : agg <= 12 ? 85 : agg <= 23 ? 70 : agg <= 29 ? 55 : agg <= 34 ? 42 : 28) * 0.5) },
+    { name: 'Responsibility', score: Math.round((rate >= 90 ? 85 : rate >= 75 ? 70 : rate >= 60 ? 55 : 35) * 0.6 + (agg == null ? 60 : agg <= 12 ? 88 : agg <= 23 ? 72 : agg <= 29 ? 56 : agg <= 34 ? 40 : 25) * 0.4) },
+    { name: 'Co-operation',   score: Math.round((rate >= 90 ? 82 : rate >= 75 ? 68 : rate >= 60 ? 52 : 36) * 0.5 + (agg == null ? 60 : agg <= 12 ? 84 : agg <= 23 ? 70 : agg <= 29 ? 55 : agg <= 34 ? 42 : 28) * 0.5) },
+  ]
+
+  font(doc, 'bold', 7); setTxt(doc, C.muted)
+  doc.text('ATTENDANCE & CONDUCT', 10, y + 4)
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.line(10, y + 6, 200, y + 6)
+
+  const sectionY = y + 9
+  const sectionH = 50
+
+  // ── LEFT: Attendance ──────────────────────────────────
+  setFill(doc, C.surface)
+  doc.roundedRect(10, sectionY, 88, sectionH, 2, 2, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.15)
+  doc.roundedRect(10, sectionY, 88, sectionH, 2, 2, 'S')
+
+  const cx = 30, cy = sectionY + 20, r = 13, stroke = 3
+
+  setDraw(doc, C.rule); doc.setLineWidth(stroke)
+  doc.circle(cx, cy, r, 'S')
+
+  if (rate > 0) {
+    setDraw(doc, rateColor); doc.setLineWidth(stroke)
+    const steps = 64
+    const startAngle = -Math.PI / 2
+    const endAngle   = startAngle + (2 * Math.PI * rate / 100)
+    for (let i = 0; i < steps; i++) {
+      const a0 = startAngle + (endAngle - startAngle) * (i / steps)
+      const a1 = startAngle + (endAngle - startAngle) * ((i + 1) / steps)
+      doc.line(
+        cx + r * Math.cos(a0), cy + r * Math.sin(a0),
+        cx + r * Math.cos(a1), cy + r * Math.sin(a1)
+      )
+    }
+  }
+
+  font(doc, 'bold', 9); setTxt(doc, rateColor)
+  doc.text(`${rate}%`, cx, cy + 1.5, { align: 'center' })
+  font(doc, 'normal', 6); setTxt(doc, C.muted)
+  doc.text('rate', cx, cy + 7, { align: 'center' })
+
+  const sx = cx + r + 8
+  font(doc, 'bold', 20); setTxt(doc, C.divU)
+  doc.text(String(absent), sx, cy + 3)
+  font(doc, 'normal', 6.5); setTxt(doc, C.muted)
+  doc.text('days absent', sx, cy + 9)
+
+  font(doc, 'bold', 11); setTxt(doc, C.ink)
+  doc.text('80', sx, cy + 20)
+  font(doc, 'normal', 6); setTxt(doc, C.muted)
+  doc.text('total school days', sx, cy + 25.5)
+
+  // ── RIGHT: Conduct ────────────────────────────────────
+  const condX = 104, condW = 96
+
+  setFill(doc, C.surface)
+  doc.roundedRect(condX, sectionY, condW, sectionH, 2, 2, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.15)
+  doc.roundedRect(condX, sectionY, condW, sectionH, 2, 2, 'S')
+
+  setFill(doc, C.ink)
+  doc.roundedRect(condX, sectionY, condW, 9, 2, 2, 'F')
+  doc.rect(condX, sectionY + 5, condW, 4, 'F')
+  font(doc, 'bold', 7); setTxt(doc, C.white)
+  doc.text('CONDUCT & CHARACTER ASSESSMENT', condX + condW / 2, sectionY + 6.5, { align: 'center' })
+
+  const col1X   = condX + 4
+  const col2X   = condX + 50
+  const headerY = sectionY + 14
+
+  font(doc, 'bold', 6); setTxt(doc, C.muted)
+  doc.text('PARTICULAR', col1X, headerY)
+  doc.text('RATING', col2X, headerY)
+
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.line(condX + 2, headerY + 2, condX + condW - 2, headerY + 2)
+
+  const rowH = 6
+  let   rowY = headerY + 6
+
+  particulars.forEach((p, i) => {
+    const rating       = scoreToRating(p.score)
+    const [rr, rg, rb] = h2r(rating.color)
+
+    if (i % 2 === 0) {
+      setFill(doc, '#F3F4F6')
+      doc.rect(condX + 1, rowY - 4, condW - 2, rowH, 'F')
+    }
+
+    font(doc, 'bold', 6.5); setTxt(doc, C.inkSoft)
+    doc.text(p.name, col1X, rowY)
+
+    const labelW = 24, labelH = 4.5, labelX = col2X, labelY = rowY - 3.5
+    setFill(doc, `#${Math.min(255, rr + 195).toString(16).padStart(2, '0')}${Math.min(255, rg + 195).toString(16).padStart(2, '0')}${Math.min(255, rb + 195).toString(16).padStart(2, '0')}`)
+    doc.roundedRect(labelX, labelY, labelW, labelH, 1, 1, 'F')
+    setDraw(doc, rating.color); doc.setLineWidth(0.2)
+    doc.roundedRect(labelX, labelY, labelW, labelH, 1, 1, 'S')
+
+    font(doc, 'bold', 6); setTxt(doc, rating.color)
+    doc.text(rating.label, labelX + labelW / 2, rowY - 0.5, { align: 'center' })
+
+    const barX = col2X + 27, barY = rowY - 3.2, barW = 26, barH = 3
+    setFill(doc, C.rule)
+    doc.roundedRect(barX, barY, barW, barH, 0.5, 0.5, 'F')
+    setFill(doc, rating.color)
+    doc.roundedRect(barX, barY, barW * (p.score / 100), barH, 0.5, 0.5, 'F')
+
+    rowY += rowH
+  })
+
+  return sectionY + sectionH + 6
 }
 
-/** Assessment marksheet — landscape */
-export function printClassMarksheet(cards, examName, className, schoolName, subjects=[]) {
-  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'})
-  // Header
-  doc.setFillColor(...h2r(C.navy)); doc.rect(0,0,297,22,'F')
-  doc.setFillColor(...h2r(C.blue)); doc.rect(0,22,297,2.5,'F')
-  doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...h2r(C.white))
-  doc.text(schoolName||'School',14,11)
-  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...h2r(C.blueL))
-  doc.text(`Assessment Marksheet  |  ${className}  |  ${examName}`,14,18)
-  doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...h2r(C.white))
-  doc.text(`${cards.length} Students`,283,13,{align:'right'})
+function drawNextTerm(doc, card, y) {
+  const H = 12, by = y
 
-  const head=['#','Student Name','Adm. No.']
-  subjects.forEach(s=>head.push(s.subject_name||s.name||''))
-  head.push('Aggregate','Division','Position')
+  setFill(doc, C.accentBg)
+  doc.roundedRect(10, by, 190, H, 1.5, 1.5, 'F')
+  setDraw(doc, C.accent); doc.setLineWidth(0.2)
+  doc.roundedRect(10, by, 190, H, 1.5, 1.5, 'S')
 
-  const body=cards.map((c,i)=>{
-    const row=[i+1,`${c.first_name} ${c.last_name}`,c.student_number||'—']
-    subjects.forEach(s=>{
-      const m=(c.marks||[]).find(mk=>mk.subject_id===s.subject_id||mk.subject_name===(s.subject_name||s.name))
-      row.push(m?(m.grade||(m.marks_obtained??'—')):'—')
+  setFill(doc, C.accent)
+  doc.roundedRect(10, by, 3, H, 1.5, 1.5, 'F')
+  doc.rect(11, by, 2, H, 'F')
+
+  font(doc, 'bold', 6); setTxt(doc, C.accent)
+  doc.text('NEXT TERM BEGINS', 17, by + 5)
+
+  font(doc, 'bold', 8); setTxt(doc, C.ink)
+  doc.text(card.next_term_begins || 'To Be Communicated', 17, by + 10)
+
+  font(doc, 'italic', 6); setTxt(doc, C.slate)
+  doc.text('Please report with all requirements on time.', 196, by + 7.5, { align: 'right' })
+
+  return by + H + 4
+}
+
+function drawComments(doc, card, y) {
+  font(doc, 'bold', 7); setTxt(doc, C.muted)
+  doc.text('OFFICIAL REMARKS', 10, y + 4)
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.line(10, y + 6, 200, y + 6)
+
+  const panH = 24, py = y + 8
+
+  // ── CLASS TEACHER ─────────────────────────────────────
+  setFill(doc, C.surface)
+  doc.roundedRect(10, py, 90, panH, 1.5, 1.5, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.roundedRect(10, py, 90, panH, 1.5, 1.5, 'S')
+
+  setFill(doc, C.accent)
+  doc.roundedRect(10, py, 90, 6, 1.5, 1.5, 'F')
+  doc.rect(10, py + 4, 90, 2, 'F')
+
+  font(doc, 'bold', 7); setTxt(doc, C.white)
+  doc.text('CLASS TEACHER', 14, py + 4.5)
+
+  font(doc, 'normal', 8); setTxt(doc, C.inkSoft)
+  const ctLines = doc.splitTextToSize(card.class_teacher_comment || 'No comment provided.', 80)
+  doc.text(ctLines.slice(0, 2), 14, py + 12)
+
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.line(14, py + panH - 3, 72, py + panH - 3)
+  font(doc, 'normal', 6); setTxt(doc, C.muted)
+  doc.text('Signature', 14, py + panH - 0.5)
+
+  // ── HEAD TEACHER ──────────────────────────────────────
+  setFill(doc, C.surface)
+  doc.roundedRect(108, py, 90, panH, 1.5, 1.5, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.roundedRect(108, py, 90, panH, 1.5, 1.5, 'S')
+
+  setFill(doc, C.ink)
+  doc.roundedRect(108, py, 90, 6, 1.5, 1.5, 'F')
+  doc.rect(108, py + 4, 90, 2, 'F')
+
+  font(doc, 'bold', 7); setTxt(doc, C.white)
+  doc.text('HEAD TEACHER', 112, py + 4.5)
+
+  font(doc, 'normal', 8); setTxt(doc, C.inkSoft)
+  const htLines = doc.splitTextToSize(card.head_teacher_comment || 'No comment provided.', 80)
+  doc.text(htLines.slice(0, 2), 112, py + 12)
+
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.line(112, py + panH - 3, 170, py + panH - 3)
+  font(doc, 'normal', 6); setTxt(doc, C.muted)
+  doc.text('Signature', 112, py + panH - 0.5)
+
+  return py + panH + 4
+}
+
+function drawGradingSummary(doc, y, bands) {
+  const PAD = 10
+
+  font(doc, 'bold', 7); setTxt(doc, C.muted)
+  doc.text('GRADING SYSTEM', PAD, y + 4)
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.line(PAD, y + 6, 200, y + 6)
+
+  const sectionY = y + 9
+  const sectionH = 24
+
+  // ── LEFT ──────────────────────────────────────────────
+  setFill(doc, C.surface)
+  doc.roundedRect(PAD, sectionY, 118, sectionH, 1.5, 1.5, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.roundedRect(PAD, sectionY, 118, sectionH, 1.5, 1.5, 'S')
+
+  if (!bands?.length) {
+    font(doc, 'normal', 7); setTxt(doc, C.muted)
+    doc.text('No grading scale defined.', PAD + 3, sectionY + 10)
+  } else {
+    font(doc, 'bold', 6); setTxt(doc, C.muted)
+    doc.text('GRADES', PAD + 3, sectionY + 7)
+    let gx = PAD + 22
+    bands.forEach(b => {
+      font(doc, 'bold', 7); setTxt(doc, b.color_hex || C.accent)
+      doc.text(b.grade, gx, sectionY + 7)
+      font(doc, 'normal', 5.5); setTxt(doc, C.muted)
+      doc.text(`${b.min_mark}–${b.max_mark}`, gx, sectionY + 12)
+      gx += 13
     })
-    row.push(c.aggregate??'—', c.division||'U', c.position_in_class??'—')
+
+    setDraw(doc, C.rule); doc.setLineWidth(0.1)
+    doc.line(PAD + 2, sectionY + 14, PAD + 116, sectionY + 14)
+
+    const DIVS = [
+      { label: 'DIV I',   range: '4–12',  color: C.div1 },
+      { label: 'DIV II',  range: '13–23', color: C.div2 },
+      { label: 'DIV III', range: '24–29', color: C.div3 },
+      { label: 'DIV IV',  range: '30–34', color: C.div4 },
+      { label: 'U',       range: '35+',   color: C.divU },
+    ]
+    font(doc, 'bold', 6); setTxt(doc, C.muted)
+    doc.text('DIVS', PAD + 3, sectionY + 19)
+    let dx = PAD + 22
+    DIVS.forEach(d => {
+      font(doc, 'bold', 6.5); setTxt(doc, d.color)
+      doc.text(d.label, dx, sectionY + 19)
+      font(doc, 'normal', 5.5); setTxt(doc, C.muted)
+      doc.text(d.range, dx, sectionY + 23)
+      dx += 22
+    })
+  }
+
+  // ── RIGHT: Stamp & Signature ──────────────────────────
+  const rightX = PAD + 122, rightW = 68
+
+  setFill(doc, C.surface)
+  doc.roundedRect(rightX, sectionY, rightW, sectionH, 1.5, 1.5, 'F')
+  setDraw(doc, C.rule); doc.setLineWidth(0.1)
+  doc.roundedRect(rightX, sectionY, rightW, sectionH, 1.5, 1.5, 'S')
+
+  const stampCX = rightX + 17, stampCY = sectionY + sectionH / 2
+  setDraw(doc, C.rule); doc.setLineWidth(0.5)
+  doc.circle(stampCX, stampCY, 9, 'S')
+  setDraw(doc, C.rule); doc.setLineWidth(0.2)
+  doc.circle(stampCX, stampCY, 7.5, 'S')
+  font(doc, 'normal', 5); setTxt(doc, C.muted)
+  doc.text('OFFICIAL', stampCX, stampCY - 1.5, { align: 'center' })
+  doc.text('STAMP', stampCX, stampCY + 3, { align: 'center' })
+
+  const sigX = rightX + 36, sigEndX = rightX + rightW - 4, sigLineY = sectionY + sectionH - 7
+  setDraw(doc, C.muted); doc.setLineWidth(0.3)
+  doc.line(sigX, sigLineY, sigEndX, sigLineY)
+  font(doc, 'normal', 5.5); setTxt(doc, C.muted)
+  doc.text('Head Teacher Signature', sigX + (sigEndX - sigX) / 2, sigLineY + 4, { align: 'center' })
+
+  return sectionY + sectionH + 5
+}
+// ── Footer ────────────────────────────────────────────────────────────────────
+function addFooter(doc, schoolName) {
+  const n  = doc.internal.getNumberOfPages()
+  const ts = new Date().toLocaleDateString('en-UG', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i)
+
+    // Accent bottom bar
+    setFill(doc, C.accent)
+    doc.rect(0, 292, 210, 5, 'F')
+
+    // Left — school name
+    font(doc, 'bold', 4.5); setTxt(doc, C.white)
+    doc.text(schoolName || 'School', 13, 295.5)
+
+    // Center — generated date
+    font(doc, 'normal', 4.5); setTxt(doc, C.white)
+    doc.text(`EXEDUEX SCHOOL MANAGEMENT SYSTEM           ~    Generated: ${ts}`, 105, 295.5, { align: 'center' })
+
+   
+  }
+}
+
+function ensureSpace(doc, y, needed) {
+  if (y + needed > 275) { doc.addPage(); drawPageBg(doc); return 18 }
+  return y
+}
+
+// ── Core renderer ─────────────────────────────────────────────────────────────
+async function renderCard(doc, card, schoolName, attendanceData, gradeBands, newPage) {
+  if (newPage) doc.addPage()
+  drawPageBg(doc)
+
+  doc.__schoolName = schoolName
+  doc.__examLabel  = card.exam_name || 'Report Card'
+
+  let y = drawHeader(doc, schoolName, card.exam_name || 'Report Card')
+  y = drawStudentPanel(doc, card, y)
+  y = drawResultSummary(doc, card, gradeBands, y)
+  y = drawMarksTable(doc, card.marks || [], y, gradeBands)
+
+  y = ensureSpace(doc, y, 10)
+  y = drawGradingSummary(doc, y, gradeBands)
+
+  if (attendanceData) {
+    y = ensureSpace(doc, y, 8)
+    y = drawAttendanceSummary(doc, attendanceData, y, card)
+  }
+
+
+  y = ensureSpace(doc, y, 9)
+  drawComments(doc, card, y)
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PUBLIC API
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function printReportCard(card, schoolName, logoUrl, gradeBands, attendanceData = null) {
+  gradeBands = Array.isArray(gradeBands) ? gradeBands : []
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  await renderCard(doc, card, schoolName, attendanceData, gradeBands, false)
+  addFooter(doc, schoolName)
+  doc.save(`report-card-${card.student_number || card.student_id}.pdf`)
+}
+
+export async function printClassReportCards(cards, examName, className, schoolName, logoUrl, gradeBands, attendanceMap = {}) {
+  if (!cards?.length) return
+  gradeBands = Array.isArray(gradeBands) ? gradeBands : []
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  for (let i = 0; i < cards.length; i++) {
+    await renderCard(
+      doc,
+      { ...cards[i], exam_name: examName },
+      schoolName,
+      attendanceMap[cards[i].student_id] || null,
+      gradeBands,
+      i > 0,
+    )
+  }
+  addFooter(doc, schoolName)
+  doc.save(`report-cards-${className.replace(/\s/g, '-')}.pdf`)
+}
+
+export async function printClassMarksheet(cards, examName, className, schoolName, subjects = [], gradeBands = []) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+
+  setFill(doc, C.ink); doc.rect(0, 0, 297, 20, 'F')
+  setFill(doc, C.accent); doc.rect(0, 20, 297, 2, 'F')
+
+  font(doc, 'bold', 12); setTxt(doc, C.white)
+  doc.text(schoolName || 'School', 12, 10)
+  font(doc, 'normal', 7); setTxt(doc, '#9CA3AF')
+  doc.text(`Assessment Marksheet  ·  ${className}  ·  ${examName}`, 12, 17)
+  font(doc, 'bold', 7); setTxt(doc, '#6B7280')
+  doc.text(`${cards.length} Entries`, 285, 12, { align: 'right' })
+
+  const head = ['#', 'Student Name', 'Adm. No.']
+  subjects.forEach(s => head.push(s.subject_name || s.name || ''))
+  head.push('Agg.', 'Div.', 'Pos.')
+
+  const body = cards.map((c, i) => {
+    const row = [i + 1, `${c.first_name} ${c.last_name}`, c.student_number || '—']
+    subjects.forEach(s => {
+      const m = (c.marks || []).find(mk =>
+        mk.subject_id === s.subject_id || mk.subject_name === (s.subject_name || s.name))
+      row.push(m ? (m.grade || (m.marks_obtained ?? '—')) : '—')
+    })
+    row.push(c.aggregate ?? '—', c.division || 'U', c.position_in_class ?? '—')
     return row
   })
 
-  const subW=subjects.length?Math.max(10,Math.floor(180/subjects.length)):0
-  autoTable(doc,{
-    startY:28,head:[head],body,
-    headStyles:{fillColor:h2r(C.navy),textColor:[255,255,255],fontStyle:'bold',fontSize:7,cellPadding:2},
-    bodyStyles:{fontSize:7.5,cellPadding:2},
-    columnStyles:{
-      0:{cellWidth:8,halign:'center'},1:{cellWidth:52},2:{cellWidth:24},
-      ...Object.fromEntries(subjects.map((_,i)=>[i+3,{cellWidth:subW,halign:'center'}])),
-      [head.length-3]:{cellWidth:16,halign:'center',fontStyle:'bold'},  // Aggregate
-      [head.length-2]:{cellWidth:18,halign:'center',fontStyle:'bold'},  // Division
-      [head.length-1]:{cellWidth:14,halign:'center'},                   // Position
+  const subW = subjects.length ? Math.max(10, Math.floor(170 / subjects.length)) : 0
+
+  autoTable(doc, {
+    startY: 25,
+    head: [head],
+    body,
+    headStyles: {
+      fillColor: rgb(C.ink), textColor: [255,255,255], fontStyle: 'bold', fontSize: 7,
+      cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
     },
-    didParseCell(data){
-      if(data.section==='body'){
-        if(GRADE_CLR[data.cell.raw]) data.cell.styles.textColor=h2r(GRADE_CLR[data.cell.raw])
-        // Aggregate column
-        if(data.column.index===head.length-3&&!isNaN(data.cell.raw)){
-          data.cell.styles.textColor=h2r(AGG_CLR(parseInt(data.cell.raw)))
-          data.cell.styles.fontStyle='bold'
+    bodyStyles: {
+      fontSize: 8, textColor: rgb(C.inkSoft),
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+    },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center', textColor: rgb(C.muted) },
+      1: { cellWidth: 55 },
+      2: { cellWidth: 28 },
+      ...Object.fromEntries(subjects.map((_, i) => [i+3, { cellWidth: subW, halign: 'center' }])),
+      [head.length-3]: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+      [head.length-2]: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+      [head.length-1]: { cellWidth: 14, halign: 'center' },
+    },
+    didParseCell(data) {
+      if (data.section === 'body') {
+        const raw = data.cell.raw
+        const gc  = gradeColor(raw, gradeBands)
+        if (gc && gc !== C.NG) data.cell.styles.textColor = rgb(gc)
+        if (data.column.index === head.length - 3 && !isNaN(raw)) {
+          data.cell.styles.textColor = rgb(aggToDivision(parseInt(raw)).color)
         }
-        // Division column — colour by division
-        if(data.column.index===head.length-2){
-          const DC={'1':'#059669','2':'#1D4ED8','3':'#7C3AED','4':'#D97706','U':'#DC2626'}
-          const c=DC[data.cell.raw]||'#94A3B8'
-          data.cell.styles.textColor=h2r(c)
-          data.cell.styles.fontStyle='bold'
+        if (data.column.index === head.length - 2) {
+          const dc  = { '1': C.div1, '2': C.div2, '3': C.div3, '4': C.div4, 'U': C.divU }
+          data.cell.styles.textColor = rgb(dc[raw] || C.muted)
         }
       }
     },
-    alternateRowStyles:{fillColor:[248,250,252]},
-    styles:{lineColor:h2r(C.border),lineWidth:0.2},
-    margin:{left:14,right:14},
+    alternateRowStyles: { fillColor: rgb(C.surface) },
+    styles: { lineColor: rgb(C.rule), lineWidth: 0.12 },
+    margin: { left: 10, right: 10 },
   })
 
-  // Footer
-  const n=doc.internal.getNumberOfPages()
-  for(let i=1;i<=n;i++){
+  const n  = doc.internal.getNumberOfPages()
+  for (let i = 1; i <= n; i++) {
     doc.setPage(i)
-    doc.setDrawColor(...h2r(C.border)); doc.setLineWidth(0.25); doc.line(14,199,283,199)
-    doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...h2r(C.slate))
-    doc.text(`${schoolName} — ${examName} — ${className} Assessment Sheet`,14,204)
-    doc.text(`${i}/${n}`,283,204,{align:'right'})
-    doc.text(`Printed: ${new Date().toLocaleString('en-UG')}`,148,204,{align:'center'})
+    setDraw(doc, C.rule); doc.setLineWidth(0.15); doc.line(10, 198, 287, 198)
+    font(doc, 'normal', 5.5); setTxt(doc, C.muted)
+    doc.text(`${schoolName} · ${examName} · ${className}`, 12, 203)
+    doc.text(`Page ${i} of ${n}`, 287, 203, { align: 'right' })
   }
-  doc.save(`marksheet-${className.replace(/\s/g,'-')}.pdf`)
+
+  doc.save(`marksheet-${className.replace(/\s/g, '-')}.pdf`)
 }
 
-/** Attendance report */
 export function printAttendanceReport(data, title, schoolName) {
-  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'})
-  doc.setFillColor(...h2r(C.navy)); doc.rect(0,0,210,22,'F')
-  doc.setFillColor(...h2r(C.blue)); doc.rect(0,22,210,2.5,'F')
-  doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...h2r(C.white))
-  doc.text(schoolName||'School',14,11)
-  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...h2r(C.blueL))
-  doc.text(title||'Attendance Report',14,18)
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  drawPageBg(doc)
 
-  let startY=30
-  // Summary boxes
-  if(data.summary){
-    const s=data.summary
-    const stats=[
-      {l:'Total Days',v:s.total_days??'—',c:C.navy},
-      {l:'Present',v:s.present_days??'—',c:'#059669'},
-      {l:'Absent',v:s.absent_days??'—',c:'#DC2626'},
-      {l:'Late',v:s.late_days??'—',c:'#D97706'},
-      {l:'Excused',v:s.excused_days??'—',c:'#7C3AED'},
-      {l:'Rate',v:s.attendance_percent!=null?`${s.attendance_percent}%`:'—',c:'#1D4ED8'},
+  setFill(doc, C.ink); doc.rect(0, 0, 210, 20, 'F')
+  setFill(doc, C.accent); doc.rect(0, 20, 210, 2, 'F')
+  font(doc, 'bold', 11); setTxt(doc, C.white)
+  doc.text(schoolName || 'School', 12, 10)
+  font(doc, 'normal', 7); setTxt(doc, '#9CA3AF')
+  doc.text(title || 'Attendance Report', 12, 17)
+
+  let startY = 26
+
+  if (data.summary) {
+    const s = data.summary
+    const rate = s.attendance_percent ?? 0
+    const rateColor = rate >= 90 ? C.div1 : rate >= 75 ? C.div2 : rate >= 60 ? C.div4 : C.divU
+    const stats = [
+      { l: 'Total', v: s.total_days ?? '—' },
+      { l: 'Present', v: s.present_days ?? '—', c: C.div1 },
+      { l: 'Absent', v: s.absent_days ?? '—', c: C.divU },
+      { l: 'Late', v: s.late_days ?? '—', c: C.div4 },
+      { l: 'Rate', v: `${rate}%`, c: rateColor },
     ]
-    let sx=14
-    stats.forEach(st=>{
-      doc.setFillColor(...h2r(C.slateL)); doc.roundedRect(sx,startY,28,16,1.5,1.5,'F')
-      doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...h2r(st.c))
-      doc.text(String(st.v),sx+14,startY+9.5,{align:'center'})
-      doc.setFont('helvetica','normal'); doc.setFontSize(5.5); doc.setTextColor(...h2r(C.slate))
-      doc.text(st.l,sx+14,startY+14,{align:'center'})
-      sx+=30
+    setFill(doc, C.surface); doc.roundedRect(10, startY, 190, 18, 2, 2, 'F')
+    setDraw(doc, C.rule); doc.setLineWidth(0.15); doc.roundedRect(10, startY, 190, 18, 2, 2, 'S')
+    let sx = 20
+    stats.forEach(st => {
+      font(doc, 'bold', 14); setTxt(doc, st.c || C.ink)
+      doc.text(String(st.v), sx + 12, startY + 11, { align: 'center' })
+      font(doc, 'normal', 5); setTxt(doc, C.muted)
+      doc.text(st.l, sx + 12, startY + 16, { align: 'center' })
+      sx += 38
     })
-    startY+=22
+    startY += 24
   }
 
-  if(data.daily?.length){
-    autoTable(doc,{
-      startY,head:[['Date','Day','Status','Check-In','Check-Out','Remarks']],
-      body:data.daily.map(d=>[
-        d.attendance_date||'—',
-        d.attendance_date?new Date(d.attendance_date).toLocaleDateString('en-UG',{weekday:'short'}):'',
-        (d.status||'').toUpperCase().replace(/_/g,' '),
-        d.check_in_time||'—',d.check_out_time||'—',d.remarks||'',
+  if (data.daily?.length) {
+    autoTable(doc, {
+      startY,
+      head: [['Date', 'Day', 'Status', 'Check-In', 'Check-Out', 'Remarks']],
+      body: data.daily.map(d => [
+        d.attendance_date || '—',
+        d.attendance_date ? new Date(d.attendance_date).toLocaleDateString('en-UG', { weekday: 'short' }) : '',
+        (d.status || '').toUpperCase().replace(/_/g, ' '),
+        d.check_in_time  || '—',
+        d.check_out_time || '—',
+        d.remarks || '',
       ]),
-      headStyles:{fillColor:h2r(C.navy),textColor:[255,255,255],fontStyle:'bold',fontSize:8},
-      bodyStyles:{fontSize:8},
-      columnStyles:{
-        0:{cellWidth:28,fontStyle:'bold'},1:{cellWidth:12,halign:'center'},
-        2:{cellWidth:22,halign:'center',fontStyle:'bold'},
-        3:{cellWidth:20,halign:'center'},4:{cellWidth:20,halign:'center'},5:{},
+      headStyles: { fillColor: rgb(C.ink), textColor: [255,255,255], fontStyle: 'bold', fontSize: 7.5 },
+      bodyStyles: { fontSize: 8.5, textColor: rgb(C.inkSoft) },
+      columnStyles: {
+        0: { cellWidth: 28 },
+        1: { cellWidth: 14, halign: 'center' },
+        2: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+        3: { cellWidth: 22, halign: 'center' },
+        4: { cellWidth: 22, halign: 'center' },
       },
-      didParseCell(data){
-        if(data.section==='body'&&data.column.index===2){
-          const m={PRESENT:'#059669',ABSENT:'#DC2626',LATE:'#D97706','HALF DAY':'#7C3AED',EXCUSED:'#0891B2'}
-          const c=m[data.cell.raw?.toUpperCase()]; if(c) data.cell.styles.textColor=h2r(c)
+      didParseCell(data) {
+        if (data.section === 'body' && data.column.index === 2) {
+          const m = { PRESENT: C.div1, ABSENT: C.divU, LATE: C.div4, 'HALF DAY': '#7C3AED', EXCUSED: '#0891B2' }
+          const c = m[data.cell.raw?.toUpperCase()]
+          if (c) data.cell.styles.textColor = rgb(c)
         }
       },
-      alternateRowStyles:{fillColor:[248,250,252]},
-      styles:{lineColor:h2r(C.border),lineWidth:0.2},margin:{left:14,right:14},
+      alternateRowStyles: { fillColor: rgb(C.surface) },
+      styles: { lineColor: rgb(C.rule), lineWidth: 0.12 },
+      margin: { left: 10, right: 10 },
     })
   }
 
-  if(data.classes?.length){
-    autoTable(doc,{
-      startY,head:[['Class','Total','Present','Absent','Late','Half-Day','Excused','Rate']],
-      body:data.classes.map(r=>[r.class_name||`Class ${r.class_id}`,r.total,r.present,r.absent,r.late,r.half_day,r.excused,r.attendance_rate!=null?`${r.attendance_rate}%`:'—']),
-      headStyles:{fillColor:h2r(C.navy),textColor:[255,255,255],fontStyle:'bold',fontSize:8},
-      bodyStyles:{fontSize:8.5},
-      columnStyles:{
-        2:{textColor:h2r('#059669')},3:{textColor:h2r('#DC2626')},
-        4:{textColor:h2r('#D97706')},7:{fontStyle:'bold',halign:'center'},
-      },
-      alternateRowStyles:{fillColor:[248,250,252]},
-      styles:{lineColor:h2r(C.border),lineWidth:0.2},margin:{left:14,right:14},
-    })
-  }
-
-  addFooter(doc,schoolName)
+  addFooter(doc, schoolName)
   doc.save('attendance-report.pdf')
 }
