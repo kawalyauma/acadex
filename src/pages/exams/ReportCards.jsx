@@ -1,14 +1,13 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/auth'
 import { useDataStore } from '../../store/data'
-import { examApi } from '../../services/api'
-import { curriculumApi } from '../../services/api'
+import { api, examApi, curriculumApi } from '../../services/api'
 import {
   Card, Button, Badge, Table, Modal, SearchableSelect,
   SectionHeader, Spinner, EmptyState, Alert, StatCard, Divider, Avatar
 } from '../../components/ui'
-import { ArrowLeft, FileText, RefreshCw, Download, Edit2, Send, Eye, AlertTriangle, Check, BookOpen } from 'lucide-react'
+import { ArrowLeft, FileText, RefreshCw, Download, Edit2, Send, Eye, AlertTriangle, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
 import { printReportCard, printClassReportCards, printClassMarksheet } from '../../lib/examPdf'
@@ -35,45 +34,64 @@ export default function ReportCards() {
   const [examName,    setExamName]    = useState('')
   const [examStatus,  setExamStatus]  = useState('')
   const [selClass,    setSelClass]    = useState('')
-  const [cards,       setCards]       = useState(null)   // null = not loaded yet
+  const [cards,       setCards]       = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [computing,   setComputing]   = useState(false)
   const [publishing,  setPublishing]  = useState(false)
+  const [gradeBands,  setGradeBands]  = useState([])
 
-  // Comment edit
   const [commentModal, setCommentModal] = useState(null)
   const [ctComment,    setCtComment]    = useState('')
   const [htComment,    setHtComment]    = useState('')
   const [savingComment,setSavingComment]= useState(false)
 
-  // Preview
   const [previewCard,  setPreviewCard]  = useState(null)
   const [cardLoading,  setCardLoading]  = useState(false)
-
-  // Subjects for marksheet
   const [examSubjects, setExamSubjects] = useState([])
 
   const classOpts = classes.map(c => ({ value: c.id, label: c.name }))
 
+  // ── Fetchers — useCallback so they're stable references ──────────────────
+  const fetchGradeBands = useCallback(async () => {
+    try {
+      const data = await examApi.gradingScales(schoolId, token)
+      const scales = Array.isArray(data) ? data : []
+      const def = scales.find(s => s.is_default) || scales[0]
+      return Array.isArray(def?.bands) ? def.bands : []
+    } catch { return [] }
+  }, [schoolId, token])
+
+  const fetchAttendance = useCallback(async (studentId) => {
+    try {
+      const to   = new Date().toISOString().slice(0, 10)
+      const from = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      const data = await api.studentReport(schoolId, studentId, from, to, token)
+      if (!data || (!data.summary && !data.total_days)) return null
+      return data
+    } catch { return null }
+  }, [schoolId, token])
+
+  // ── Load cards + grade bands together ────────────────────────────────────
   const loadCards = useCallback(async (classId) => {
     if (!classId || !examId) return
     setLoading(true)
     setCards(null)
     try {
-      const [cardData, examData, subjects] = await Promise.all([
+      const [cardData, examData, subjects, bands] = await Promise.all([
         examApi.reportCards(schoolId, examId, classId, token),
         examApi.getExam(schoolId, examId, token).catch(() => null),
         examApi.examSubjects(schoolId, examId, classId, token).catch(() => []),
+        fetchGradeBands(),
       ])
+      setGradeBands(Array.isArray(bands) ? bands : [])
       setCards(Array.isArray(cardData) ? cardData : [])
       if (examData?.name)   setExamName(examData.name)
       if (examData?.status) setExamStatus(examData.status)
       setExamSubjects(Array.isArray(subjects) ? subjects : [])
     } catch (e) { toast.error(e.message); setCards([]) }
     finally { setLoading(false) }
-  }, [schoolId, examId, token])
+  }, [schoolId, examId, token, fetchGradeBands])
 
-  // ── Compute ──────────────────────────────────────────────
   const handleCompute = async () => {
     if (!selClass) return toast.error('Select a class first')
     setComputing(true)
@@ -85,7 +103,6 @@ export default function ReportCards() {
     finally { setComputing(false) }
   }
 
-  // ── Publish ───────────────────────────────────────────────
   const handlePublish = async () => {
     if (!selClass) return toast.error('Select a class first')
     if (!confirm('Publish results for this class?')) return
@@ -98,12 +115,12 @@ export default function ReportCards() {
     finally { setPublishing(false) }
   }
 
-  // ── Comments ──────────────────────────────────────────────
   const openComment = (card) => {
     setCommentModal(card)
     setCtComment(card.class_teacher_comment || '')
     setHtComment(card.head_teacher_comment  || '')
   }
+
   const saveComments = async () => {
     setSavingComment(true)
     try {
@@ -116,57 +133,71 @@ export default function ReportCards() {
     finally { setSavingComment(false) }
   }
 
-  // ── Preview ───────────────────────────────────────────────
   const openPreview = async (card) => {
     setPreviewCard('loading')
     setCardLoading(true)
     try {
       const [full, currProfile] = await Promise.all([
         examApi.studentCard(schoolId, examId, card.student_id, token),
-        // Load curriculum academic profile for the same term
-        examName
-          ? curriculumApi.studentAcademicProfile(schoolId, card.student_id, {}, token).catch(() => null)
-          : Promise.resolve(null),
+        curriculumApi.studentAcademicProfile(schoolId, card.student_id, {}, token).catch(() => null),
       ])
       setPreviewCard({ ...full, _curriculum: currProfile })
     } catch (e) { toast.error(e.message); setPreviewCard(null) }
     finally { setCardLoading(false) }
   }
 
-  // ── Print helpers ─────────────────────────────────────────
+  // ── Print single ──────────────────────────────────────────────────────────
   const printOne = async (card) => {
     try {
-      const [full, curriculum] = await Promise.all([
+      const [full, curriculum, att] = await Promise.all([
         examApi.studentCard(schoolId, examId, card.student_id, token),
         curriculumApi.studentAcademicProfile(schoolId, card.student_id, {}, token).catch(() => null),
+        fetchAttendance(card.student_id),
       ])
-      await printReportCard({ ...full, _curriculum: curriculum }, school?.name, school?.logo_url || null, null)
+      await printReportCard(
+        { ...full, _curriculum: curriculum },
+        school?.name,
+        school?.logo_url || null,
+        gradeBands,
+        att,
+      )
     } catch (e) { toast.error(e.message) }
   }
 
+  // ── Print all ─────────────────────────────────────────────────────────────
   const printAll = async () => {
     if (!cards?.length) return
     toast.loading('Generating PDFs…', { id: 'pdf' })
     try {
       const full = []
       for (const c of cards) {
-        const [fc, curriculum] = await Promise.all([
+        const [fc, curriculum, att] = await Promise.all([
           examApi.studentCard(schoolId, examId, c.student_id, token).catch(() => c),
           curriculumApi.studentAcademicProfile(schoolId, c.student_id, {}, token).catch(() => null),
+          fetchAttendance(c.student_id),
         ])
-        full.push({ ...fc, _curriculum: curriculum })
+        full.push({ ...fc, _curriculum: curriculum, _attendance: att })
       }
-      const cls = classes.find(c => String(c.id) === String(selClass))
-      await printClassReportCards(full, examName, cls?.name || 'Class', school?.name, school?.logo_url || null, {})
+      const cls    = classes.find(c => String(c.id) === String(selClass))
+      const attMap = Object.fromEntries(full.map(c => [c.student_id, c._attendance]))
+      await printClassReportCards(
+        full,
+        examName,
+        cls?.name || 'Class',
+        school?.name || 'School',
+        school?.logo_url || null,
+        gradeBands,
+        attMap,
+      )
       toast.success(`${full.length} report cards downloaded`, { id: 'pdf' })
     } catch (e) { toast.error(e.message, { id: 'pdf' }) }
   }
 
-  const printSheet = () => {
+  // ── Print marksheet ───────────────────────────────────────────────────────
+  const printSheet = async () => {
     if (!cards?.length) return
     const cls = classes.find(c => String(c.id) === String(selClass))
-    // Enrich cards with marks from preview if available
-    printClassMarksheet(cards, examName, cls?.name || 'Class', school?.name, examSubjects)
+    await printClassMarksheet(cards, examName, cls?.name, school?.name, examSubjects, gradeBands)
     toast.success('Marksheet downloaded')
   }
 
@@ -226,8 +257,8 @@ export default function ReportCards() {
       render: (_, row) => (
         <div className="flex gap-1">
           <Button size="xs" variant="ghost" icon={Eye}      onClick={() => openPreview(row)} title="Preview" />
-          <Button size="xs" variant="ghost" icon={Edit2}    onClick={() => openComment(row)}  title="Edit comments" />
-          <Button size="xs" variant="ghost" icon={Download} onClick={() => printOne(row)}     title="Download PDF" />
+          <Button size="xs" variant="ghost" icon={Edit2}    onClick={() => openComment(row)} title="Edit comments" />
+          <Button size="xs" variant="ghost" icon={Download} onClick={() => printOne(row)}    title="Download PDF" />
         </div>
       )
     },
@@ -235,7 +266,6 @@ export default function ReportCards() {
 
   return (
     <div className="page space-y-5">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => navigate(`/exams/${examId}`)} />
         <div>
@@ -244,7 +274,6 @@ export default function ReportCards() {
         </div>
       </div>
 
-      {/* Class selector + action bar */}
       <Card className="flex flex-wrap gap-3 items-end">
         <div className="w-60">
           <SearchableSelect label="Select Class"
@@ -252,14 +281,11 @@ export default function ReportCards() {
             onChange={v => { setSelClass(v); loadCards(v) }}
             placeholder="Choose a class…" />
         </div>
-
-        {/* COMPUTE — the key step users miss */}
         <Button icon={RefreshCw} loading={computing} onClick={handleCompute}
           disabled={!selClass} className="self-end"
           variant={cards === null || cards?.length === 0 ? 'primary' : 'secondary'}>
           Compute &amp; Rank
         </Button>
-
         {cards?.length > 0 && (
           <>
             <Button variant="secondary" icon={Send}     loading={publishing} onClick={handlePublish} className="self-end">Publish</Button>
@@ -269,7 +295,6 @@ export default function ReportCards() {
         )}
       </Card>
 
-      {/* Guidance banner — shown before compute */}
       {selClass && cards !== null && cards.length === 0 && !loading && (
         <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50">
           <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
@@ -297,20 +322,18 @@ export default function ReportCards() {
 
       {loading && <div className="p-12 flex justify-center"><Spinner /></div>}
 
-      {/* Stats */}
       {cards?.length > 0 && !loading && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Students"    value={cards.length}                                             color="#2563EB" />
-          <StatCard label="Published"   value={pubCount}                                                color="#059669" />
-          <StatCard label="Best Agg."   value={Math.min(...cards.filter(c=>c.aggregate!=null).map(c=>c.aggregate)) || '—'} color="#7C3AED" />
-          <StatCard label="Avg Agg."    value={(() => {
+          <StatCard label="Students"  value={cards.length}  color="#2563EB" />
+          <StatCard label="Published" value={pubCount}       color="#059669" />
+          <StatCard label="Best Agg." value={Math.min(...cards.filter(c=>c.aggregate!=null).map(c=>c.aggregate)) || '—'} color="#7C3AED" />
+          <StatCard label="Avg Agg."  value={(() => {
             const w = cards.filter(c=>c.aggregate!=null)
             return w.length ? (w.reduce((s,c)=>s+c.aggregate,0)/w.length).toFixed(1) : '—'
           })()} color="#D97706" />
         </div>
       )}
 
-      {/* Table */}
       {cards?.length > 0 && !loading && (
         <Card noPad>
           <Table columns={columns} data={cards}
@@ -318,7 +341,7 @@ export default function ReportCards() {
         </Card>
       )}
 
-      {/* ── Edit Comments Modal ── */}
+      {/* Edit Comments Modal */}
       <Modal open={!!commentModal} onClose={() => setCommentModal(null)}
         title={`Comments — ${commentModal?.first_name||''} ${commentModal?.last_name||''}`} width={580}
         footer={
@@ -354,7 +377,7 @@ export default function ReportCards() {
         )}
       </Modal>
 
-      {/* ── Preview Modal ── */}
+      {/* Preview Modal */}
       <Modal open={!!previewCard} onClose={() => setPreviewCard(null)}
         title="Report Card Preview" width={700}
         footer={
@@ -362,7 +385,11 @@ export default function ReportCards() {
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => setPreviewCard(null)}>Close</Button>
               <Button icon={Download} className="flex-1"
-                onClick={() => printReportCard(previewCard, school?.name, school?.logo_url || null, null)}>
+                onClick={async () => {
+                  if (!previewCard || previewCard === 'loading') return
+                  const att = await fetchAttendance(previewCard.student_id)
+                  await printReportCard(previewCard, school?.name, school?.logo_url || null, gradeBands, att)
+                }}>
                 Download PDF
               </Button>
             </div>
@@ -395,7 +422,6 @@ function CardPreview({ card }) {
 
   return (
     <div className="space-y-4 text-sm">
-      {/* Student header */}
       <div className="p-4 bg-slate-800 rounded-xl flex items-center gap-4 text-white">
         <Avatar name={`${card.first_name||''} ${card.last_name||''}`} size="lg" />
         <div className="flex-1">
@@ -404,7 +430,6 @@ function CardPreview({ card }) {
           <p className="text-xs text-slate-400">{card.exam_name} · {card.term_name}</p>
         </div>
         <div className="text-right">
-          {/* Division — the headline result */}
           <div className="inline-flex items-center justify-center w-20 h-10 rounded-xl mb-1"
             style={{ background: ac + '22', border: `2px solid ${ac}` }}>
             <span className="font-display font-bold text-sm" style={{ color: ac }}>
@@ -421,7 +446,6 @@ function CardPreview({ card }) {
         </div>
       </div>
 
-      {/* Marks table */}
       {card.marks?.length > 0 ? (
         <table className="w-full">
           <thead>
@@ -457,7 +481,6 @@ function CardPreview({ card }) {
         <p className="text-sm text-slate-400 text-center py-4">No marks entered yet.</p>
       )}
 
-      {/* Comments */}
       <Divider label="Teacher Comments" />
       <div className="grid grid-cols-2 gap-3">
         {[
@@ -471,12 +494,10 @@ function CardPreview({ card }) {
         ))}
       </div>
 
-      {/* Curriculum performance summary */}
       {card._curriculum && (
         <>
           <Divider label="Curriculum Performance (This Term)" />
           <div className="space-y-2">
-            {/* Summary stats */}
             <div className="grid grid-cols-3 gap-2">
               {[
                 { l:'Lessons Attended', v: card._curriculum.lessons_attended || card._curriculum.total_lessons || 0, c:'#2563EB' },
@@ -489,8 +510,6 @@ function CardPreview({ card }) {
                 </div>
               ))}
             </div>
-
-            {/* Per-subject breakdown */}
             {card._curriculum.subjects?.length > 0 && (
               <table className="w-full text-xs">
                 <thead>
